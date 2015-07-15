@@ -1,19 +1,163 @@
 # -*- coding: utf-8 -*-
-import os, time
+import os
+import re
+import hashlib
 # Use cPickle in python 2 and pickle in python 3
 try:
     import cPickle as pickle
 except ImportError:
     import pickle
 
-from funcy import wraps, str_join
+from funcy import wraps, str_join, walk_values
+from termcolor import colored, cprint
+
+from funcy import print_durations
 
 
 DEFAULT_CACHE_DIR = '/tmp/debug_cache'
-DEFAULT_CACHE_TIMEOUT = 60*60*24*30
+# DEFAULT_CACHE_TIMEOUT = 60*60*24*30
 
 
 __all__ = ('cache', 'cached', 'CacheMiss', 'DebugCache')
+
+
+import pandas as pd
+
+FLOAT_PRECISION = 0.002
+# FLOAT_PRECISION = 0.00001
+
+def _series_equal(a, b):
+    if a.dtype == 'float64':
+        # TODO: handle NaNs
+        return (abs(a - b) <= FLOAT_PRECISION).all()
+    else:
+        return a.equals(b)
+
+# @print_durations
+def compare(a, b):
+    if isinstance(a, pd.DataFrame) and isinstance(b, pd.DataFrame):
+        return a.columns.equals(b.columns) and a.dtypes.equals(b.dtypes) and len(a) == len(b) \
+            and all(_series_equal(a[col], b[col]) for col in a.columns)
+    else:
+        return a == b
+
+
+# Borrowed these from pytest.assertion.util
+
+import pprint, py
+
+def _compare_eq_sequence(left, right, verbose=False):
+    explanation = []
+    for i in range(min(len(left), len(right))):
+        if left[i] != right[i]:
+            explanation += ['At index %s diff: %r != %r'
+                            % (i, left[i], right[i])]
+            break
+    if len(left) > len(right):
+        explanation += ['Left contains more items, first extra item: %s'
+                        % py.io.saferepr(left[len(right)],)]
+    elif len(left) < len(right):
+        explanation += [
+            'Right contains more items, first extra item: %s' %
+            py.io.saferepr(right[len(left)],)]
+    return explanation  # + _diff_text(pprint.pformat(left),
+                        #              pprint.pformat(right))
+
+
+def _compare_eq_set(left, right, verbose=False):
+    explanation = []
+    diff_left = left - right
+    diff_right = right - left
+    if diff_left:
+        explanation.append('Extra items in the left set:')
+        for item in diff_left:
+            explanation.append(py.io.saferepr(item))
+    if diff_right:
+        explanation.append('Extra items in the right set:')
+        for item in diff_right:
+            explanation.append(py.io.saferepr(item))
+    return explanation
+
+
+def _compare_eq_dict(left, right, verbose=False):
+    explanation = []
+    common = set(left).intersection(set(right))
+    same = dict((k, left[k]) for k in common if left[k] == right[k])
+    if same and not verbose:
+        explanation += ['Omitting %s identical items, use -v to show' %
+                        len(same)]
+    elif same:
+        explanation += ['Common items:']
+        explanation += pprint.pformat(same).splitlines()
+    diff = set(k for k in common if left[k] != right[k])
+    if diff:
+        explanation += ['Differing items:']
+        for k in diff:
+            explanation += [py.io.saferepr({k: left[k]}) + ' != ' +
+                            py.io.saferepr({k: right[k]})]
+    extra_left = set(left) - set(right)
+    if extra_left:
+        explanation.append('Left contains more items:')
+        explanation.extend(pprint.pformat(
+            dict((k, left[k]) for k in extra_left)).splitlines())
+    extra_right = set(right) - set(left)
+    if extra_right:
+        explanation.append('Right contains more items:')
+        explanation.extend(pprint.pformat(
+            dict((k, right[k]) for k in extra_right)).splitlines())
+    return explanation
+
+# end utils from pytest.assertion.util
+
+from funcy import joining, izip_dicts, print_errors
+
+@print_errors
+@joining('\n')
+def explain_diff(a, b):
+    assert isinstance(a, pd.DataFrame) and isinstance(b, pd.DataFrame)
+
+    res = []
+
+    # Compare column sets
+    a_cols = set(a.columns)
+    b_cols = set(b.columns)
+    if a_cols != b_cols:
+        # return _compare_eq_set(a_cols, b_cols)
+        if a_cols - b_cols:
+            res.append('Removed columns: %s' % ', '.join(a_cols - b_cols))
+        if b_cols - a_cols:
+            res.append('Added columns: %s' % ', '.join(b_cols - a_cols))
+        return res
+
+    # Compare column types
+    if not a.dtypes.equals(b.dtypes):
+        for name in a.columns:
+            if a.dtype != b.dtype:
+                res.append('Column %s changed type from %s to %s' % (name, a.dtype, b.dtype))
+        return res
+
+    # Compare len
+    if len(a) != len(b):
+        res.append('Data length changed from %d to %d' % (len(a), len(b)))
+        return res
+
+    # Compare indexes
+    if not a.index.equals(b.index):
+        return ['Indexes mismatch:'] + _compare_eq_sequence(a.index, b.index)
+
+    # Compare values
+    for name in a.columns:
+        acol = a[name]
+        bcol = b[name]
+        if not _series_equal(acol, bcol):
+            if acol.dtype == 'float64':
+                diff = acol.index[abs(acol - bcol) > FLOAT_PRECISION]
+            else:
+                diff = acol.index[acol != bcol]
+            res.append('Column %s has %d diffrences,' % (name, len(diff)))
+            res.append('  first one is at index %s, changed from %s to %s'
+                        % (diff[0], acol[diff[0]], bcol[diff[0]]))
+    return res
 
 
 class CacheMiss(Exception):
@@ -25,79 +169,147 @@ class DebugCache(object):
     Uses mtimes in the future to designate expire time. This makes unnecessary
     reading stale files.
     """
-    def __init__(self, path=DEFAULT_CACHE_DIR, timeout=DEFAULT_CACHE_TIMEOUT):
+    def __init__(self, path=DEFAULT_CACHE_DIR):
         self._path = path
-        self._default_timeout = timeout
+        # self._default_timeout = timeout
 
-    def cached(self, timeout=None):
+    @print_durations
+    def _call_info(self, func, args, kwargs):
+        # with print_durations('serialize args'):
+        serialized_args = map(serialize, args)
+        serialized_kwargs = walk_values(serialize, kwargs)
+
+        parts = []
+        parts.extend(smart_str(a) for a in args)
+        parts.extend('%s=%s' % (k, smart_str(v)) for k, v in sorted(kwargs.items()))
+        parts.append(hash_args(serialized_args, serialized_kwargs))
+        dirname = '%s/%s' % (func.__name__, '.'.join(parts))
+
+        return dirname, serialized_args, serialized_kwargs
+
+    def cached(self, func):
         """
         A decorator for caching function calls
         """
-        # Support @cached (without parentheses) form
-        if callable(timeout):
-            return self.cached()(timeout)
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            dirname, serialized_args, serialized_kwargs = self._call_info(func, args, kwargs)
+
+            try:
+                result = self._get(dirname)
+            except CacheMiss:
+                result = func(*args, **kwargs)
+                self._set(dirname, serialized_args, serialized_kwargs, result)
+
+            return result
+
+        # def invalidate(*args, **kwargs):
+        #     cache_key = key_func(func, args, kwargs)
+        #     self.delete(cache_key)
+        # wrapper.invalidate = invalidate
+
+        return wrapper
+
+    def checked(self, func=None, strict=True, compare=compare):
+        """
+        Checks that function output doesn't change for same input.
+        """
+        # Allow using @checked without parentheses
+        if callable(func):
+            return self.checked()(func)
 
         def decorator(func):
             @wraps(func)
+            # @print_durations
             def wrapper(*args, **kwargs):
-                cache_key = key_func(func, args, kwargs)
+                dirname, serialized_args, serialized_kwargs = self._call_info(func, args, kwargs)
+
                 try:
-                    result = self.get(cache_key)
-                except CacheMiss:
+                    print 'check', dirname
+                    saved_result = self._get(dirname)
                     result = func(*args, **kwargs)
-                    self.set(cache_key, result, timeout)
+                except CacheMiss:
+                    if strict:
+                        cprint('No result for %s' % dirname, 'red')
+                        try:
+                            import ipdb; ipdb.set_trace()
+                        except ImportError:
+                            import pdb; pdb.set_trace()
+                    else:
+                        result = func(*args, **kwargs)
+                        self._set(dirname, serialized_args, serialized_kwargs, result)
+                else:
+                    if not compare(saved_result, result):
+                        cprint('Result change in %s' % dirname, 'red')
+                        print explain_diff(saved_result, result)
+                        # print ''
+                        print 'hey'
+                        try:
+                            import ipdb; ipdb.set_trace()
+                        except ImportError:
+                            import pdb; pdb.set_trace()
 
                 return result
-
-            def invalidate(*args, **kwargs):
-                cache_key = key_func(func, args, kwargs)
-                self.delete(cache_key)
-            wrapper.invalidate = invalidate
 
             return wrapper
         return decorator
 
-    def _key_to_filename(self, key):
-        """
-        Returns a filename corresponding to cache key
-        """
-        return os.path.join(self._path, key)
-
-    def get(self, key):
-        filename = self._key_to_filename(key)
+    # @print_durations
+    def _get(self, dirname):
+        filename = os.path.join(self._path, dirname, 'out')
         try:
-            # Remove file if it's stale
-            if time.time() >= os.stat(filename).st_mtime:
-                self.delete(filename)
-                raise CacheMiss
-
             with open(filename, 'rb') as f:
                 return pickle.load(f)
         except (IOError, OSError, EOFError, pickle.PickleError):
             raise CacheMiss
 
-    def set(self, key, data, timeout=None):
-        filename = self._key_to_filename(key)
-        dirname = os.path.dirname(filename)
+    # @print_durations
+    def _set(self, dirname, serialized_args, serialized_kwargs, result):
+        path = os.path.join(self._path, dirname)
 
-        if timeout is None:
-            timeout = self._default_timeout
+        if not os.path.exists(path):
+            os.makedirs(path)
 
+        for i, value in enumerate(serialized_args):
+            self._write_file(os.path.join(path, 'a%d' % i), value)
+        for name, value in serialized_kwargs.items():
+            self._write_file(os.path.join(path, 'k' + name), value)
+
+        self._write_file(os.path.join(path, 'out'), serialize(result))
+
+    def _write_file(self, filename, data):
+        # Use open with exclusive rights to prevent data corruption
+        f = os.open(filename, os.O_EXCL | os.O_WRONLY | os.O_CREAT)
         try:
-            if not os.path.exists(dirname):
-                os.makedirs(dirname)
+            os.write(f, data)
+        finally:
+            os.close(f)
 
-            # Use open with exclusive rights to prevent data corruption
-            f = os.open(filename, os.O_EXCL | os.O_WRONLY | os.O_CREAT)
-            try:
-                os.write(f, pickle.dumps(data, pickle.HIGHEST_PROTOCOL))
-            finally:
-                os.close(f)
+    # def set(self, key, data, timeout=None):
+    #     filename = self._key_to_filename(key)
+    #     dirname = os.path.dirname(filename)
 
-            # Set mtime to expire time
-            os.utime(filename, (0, time.time() + timeout))
-        except (IOError, OSError):
-            pass
+    #     if timeout is None:
+    #         timeout = self._default_timeout
+
+    #     try:
+    #         if not os.path.exists(dirname):
+    #             os.makedirs(dirname)
+
+    #         # Use open with exclusive rights to prevent data corruption
+    #         print 'w0', filename
+    #         f = os.open(filename, os.O_EXCL | os.O_WRONLY | os.O_CREAT)
+    #         try:
+    #             print 'w1'
+    #             os.write(f, pickle.dumps(data, pickle.HIGHEST_PROTOCOL))
+    #             print 'w2'
+    #         finally:
+    #             os.close(f)
+
+    #         # Set mtime to expire time
+    #         os.utime(filename, (0, time.time() + timeout))
+    #     except (IOError, OSError):
+    #         pass
 
     def delete(self, fname):
         try:
@@ -108,18 +320,38 @@ class DebugCache(object):
         except (IOError, OSError):
             pass
 
+    # def _key_to_filename(self, key):
+    #     """
+    #     Returns a filename corresponding to cache key
+    #     """
+    #     return os.path.join(self._path, key)
+
 cache = DebugCache()
 
 
-def key_func(func, args, kwargs):
-    """
-    Make cache key to be nice filename.
-    """
-    factors = []
-    if args:
-        factors.append(str_join('-', args))
-    if kwargs:
-        factors.append(str_join('-', map('%s=%s'.__mod__, sorted(kwargs.items()))))
-    # if extra is not None:
-    #     factors.append(str(extra))
-    return '%s/%s.pkl' % (func.__name__, '.'.join(factors))
+def smart_str(value, max_len=20):
+    s = str(value).strip()
+    s = re.sub(r'\s+', ' ', s)
+    if max_len and len(s) > max_len:
+        s = s[:max_len-1] + '*'
+    return s
+
+def serialize(value):
+    try:
+        return pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
+    except pickle.PickleError:
+        return pickle.dumps(value)
+
+
+def md5hex(s):
+    return hashlib.md5(s).hexdigest()
+
+# @print_durations
+def hash_args(serialized_args, serialized_kwargs):
+    hash_sum = hashlib.md5()
+    for ha in serialized_args:
+        hash_sum.update(ha)
+    for k, v in sorted(serialized_kwargs.items()):
+        hash_sum.update(k)
+        hash_sum.update(v)
+    return hash_sum.hexdigest()

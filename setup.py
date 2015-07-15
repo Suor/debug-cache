@@ -15,6 +15,8 @@ setup(
     py_modules=['debug_cache'],
     install_requires=[
         'funcy>=1.2,<2.0',
+        'termcolor',
+        'py',
     ],
     classifiers=[
         'Development Status :: 4 - Beta',
