@@ -8,7 +8,7 @@ try:
 except ImportError:
     import pickle
 
-from funcy import wraps, str_join, walk_values
+from funcy import wraps, str_join, walk_values, filter
 from termcolor import colored, cprint
 
 from funcy import print_durations
@@ -33,7 +33,6 @@ def _series_equal(a, b):
     else:
         return a.equals(b)
 
-# @print_durations
 def compare(a, b):
     if isinstance(a, pd.DataFrame) and isinstance(b, pd.DataFrame):
         return a.columns.equals(b.columns) and a.dtypes.equals(b.dtypes) and len(a) == len(b) \
@@ -109,7 +108,7 @@ def _compare_eq_dict(left, right, verbose=False):
 
 # end utils from pytest.assertion.util
 
-from funcy import joining, izip_dicts, print_errors
+from funcy import joining, print_errors
 
 @print_errors
 @joining('\n')
@@ -171,11 +170,8 @@ class DebugCache(object):
     """
     def __init__(self, path=DEFAULT_CACHE_DIR):
         self._path = path
-        # self._default_timeout = timeout
 
-    @print_durations
     def _call_info(self, func, args, kwargs):
-        # with print_durations('serialize args'):
         serialized_args = map(serialize, args)
         serialized_kwargs = walk_values(serialize, kwargs)
 
@@ -186,6 +182,19 @@ class DebugCache(object):
         dirname = '%s/%s' % (func.__name__, '.'.join(parts))
 
         return dirname, serialized_args, serialized_kwargs
+
+    def _load_call_info(self, dirname):
+        path = os.path.join(self._path, dirname)
+        files = os.listdir(path)
+
+        arg_files = sorted(filter(r'^a', files))
+        args = tuple(map(self._read_data, (os.path.join(path, f) for f in arg_files)))
+
+        kwarg_files = filter(r'^k', files)
+        kwarg_files = {filename[1:]: os.path.join(path, filename) for filename in kwarg_files}
+        kwargs = walk_values(self._read_data, kwarg_files)
+
+        return args, kwargs
 
     def cached(self, func):
         """
@@ -210,7 +219,7 @@ class DebugCache(object):
 
         return wrapper
 
-    def checked(self, func=None, strict=True, compare=compare):
+    def checked(self, func=None, strict=True, compare=compare, subs=None):
         """
         Checks that function output doesn't change for same input.
         """
@@ -218,11 +227,19 @@ class DebugCache(object):
         if callable(func):
             return self.checked()(func)
 
+        subs = subs or {}
+
         def decorator(func):
+            prepend = lambda s: '%s/%s' % (func.__name__, s)
+            _subs = {prepend(k): prepend(v) for k, v in subs.items()}
+
             @wraps(func)
-            # @print_durations
             def wrapper(*args, **kwargs):
                 dirname, serialized_args, serialized_kwargs = self._call_info(func, args, kwargs)
+                if dirname in _subs:
+                    cprint('Using substition in check', 'green')
+                    dirname = _subs[dirname]
+                    args, kwargs = self._load_call_info(dirname)
 
                 try:
                     print 'check', dirname
@@ -236,6 +253,8 @@ class DebugCache(object):
                         except ImportError:
                             import pdb; pdb.set_trace()
                     else:
+                        # NOTE: get rid of non-strict?
+                        raise NotImplementedError('Non-strict is only partially implemented')
                         result = func(*args, **kwargs)
                         self._set(dirname, serialized_args, serialized_kwargs, result)
                 else:
@@ -258,6 +277,7 @@ class DebugCache(object):
     def _get(self, dirname):
         filename = os.path.join(self._path, dirname, 'out')
         try:
+            # return self._read_data(filename)
             with open(filename, 'rb') as f:
                 return pickle.load(f)
         except (IOError, OSError, EOFError, pickle.PickleError):
@@ -276,6 +296,14 @@ class DebugCache(object):
             self._write_file(os.path.join(path, 'k' + name), value)
 
         self._write_file(os.path.join(path, 'out'), serialize(result))
+
+    # def _read_file(self, filename):
+    #     with open(filename, 'rb') as f:
+    #         return f.read()
+
+    def _read_data(self, filename):
+        with open(filename, 'rb') as f:
+            return pickle.load(f)
 
     def _write_file(self, filename, data):
         # Use open with exclusive rights to prevent data corruption
@@ -341,6 +369,9 @@ def serialize(value):
         return pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
     except pickle.PickleError:
         return pickle.dumps(value)
+
+def deserialize(value):
+    return pickle.loads(value)
 
 
 def md5hex(s):
