@@ -1,6 +1,8 @@
 Debug cache
 ===========
 
+**Note**. This is Pre-Alpha software, probably only useful for me right now.
+
 A cache meant to speed up debugging and testing process. Stores intermediate results in files.
 
 
