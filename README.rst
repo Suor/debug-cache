@@ -46,3 +46,15 @@ Custom default path and timeout:
     def some_function(x, y):
         # do something
         return res
+
+
+Check that function results didn't change:
+
+.. code:: python
+
+    @cache.checked
+    def some_function(x, y):
+        # ...
+
+This will stop and start debugger if function results doesn't match saved ones with `@cache.cached`
+earlier. It also stops if no cached results is found.
