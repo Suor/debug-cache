@@ -236,7 +236,7 @@ class DebugCache(object):
 
         return wrapper
 
-    def checked(self, func=None, strict=True, compare=compare, subs=None):
+    def checked(self, func=None, strict=True, subs=None):
         """
         Checks that function output doesn't change for same input.
         """
