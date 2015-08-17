@@ -288,6 +288,27 @@ class DebugCache(object):
             return wrapper
         return decorator
 
+    def checked_call(self, func, state): #, strict=True):
+        dirname = '%s/%s' % (func.__name__, state)
+        print dirname
+        args, kwargs = self._load_call_info(dirname)
+        # self.checked(strict=strict)(func)(*args, **kwargs)
+
+        try:
+            saved_result = self._get(dirname)
+            result = func(*args, **kwargs)
+        except CacheMiss:
+            raise LookupError('No recored call %s' % dirname, 'red')
+        else:
+            if not compare(saved_result, result):
+                cprint('Result change in %s' % dirname, 'red')
+                print explain_diff(saved_result, result)
+                try:
+                    import ipdb; ipdb.set_trace()
+                except ImportError:
+                    import pdb; pdb.set_trace()
+
+
     # @print_durations
     def _get(self, dirname):
         filename = os.path.join(self._path, dirname, 'out')
