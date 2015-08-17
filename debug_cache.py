@@ -117,7 +117,7 @@ from funcy import joining, print_errors
 
 @print_errors
 @joining('\n')
-def explain_diff(a, b):
+def explain_frame_diff(a, b):
     assert isinstance(a, pd.DataFrame) and isinstance(b, pd.DataFrame)
 
     res = []
@@ -162,6 +162,18 @@ def explain_diff(a, b):
             res.append('  first one is at index %s, changed from %s to %s'
                         % (diff[0], acol[diff[0]], bcol[diff[0]]))
     return res
+
+
+from collections import Mapping
+
+def explain_diff(a, b):
+    if isinstance(a, pd.DataFrame) and isinstance(b, pd.DataFrame):
+        return explain_frame_diff(a, b)
+    elif isinstance(a, Mapping) and isinstance(b, Mapping):
+        return '\n'.join(_compare_eq_dict(a, b))
+    else:
+        raise NotImplementedError("Don't know how tp compare %s to %s "
+                                  % (a.__class__.__name__, b.__class__.__name__))
 
 
 class CacheMiss(Exception):
