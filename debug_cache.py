@@ -270,8 +270,6 @@ class DebugCache(object):
                         except ImportError:
                             import pdb; pdb.set_trace()
                     else:
-                        # NOTE: get rid of non-strict?
-                        raise NotImplementedError('Non-strict is only partially implemented')
                         result = func(*args, **kwargs)
                         self._set(dirname, serialized_args, serialized_kwargs, result)
                 else:
