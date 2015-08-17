@@ -213,6 +213,10 @@ class DebugCache(object):
 
         return args, kwargs
 
+    def load_call_info(self, func, state):
+        dirname = '%s/%s' % (func.__name__, state)
+        return self._load_call_info(dirname)
+
     def cached(self, func):
         """
         A decorator for caching function calls
@@ -308,6 +312,10 @@ class DebugCache(object):
                 except ImportError:
                     import pdb; pdb.set_trace()
 
+
+    def liststates(self, func):
+        path = os.path.join(self._path, func.__name__)
+        return os.listdir(path)
 
     # @print_durations
     def _get(self, dirname):
