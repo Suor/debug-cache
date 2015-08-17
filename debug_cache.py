@@ -38,8 +38,12 @@ def compare(a, b):
     if isinstance(a, pd.DataFrame) and isinstance(b, pd.DataFrame):
         return a.columns.equals(b.columns) and a.dtypes.equals(b.dtypes) and len(a) == len(b) \
             and all(_series_equal(a[col], b[col]) for col in a.columns)
-    else:
+    elif isinstance(a, pd.Series) and isinstance(b, pd.Series):
+        return _series_equal(a, b)
+    elif isinstance(a, (list, tuple, set, dict)) and isinstance(b, (list, tuple, set, dict)):
         return a == b
+    else:
+        return pickle.dumps(a) == pickle.dumps(b)
 
 
 # Borrowed these from pytest.assertion.util
