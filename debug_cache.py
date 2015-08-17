@@ -10,6 +10,8 @@ except ImportError:
 
 from funcy import wraps, str_join, walk_values, filter
 from termcolor import colored, cprint
+import numpy as np
+import pandas as pd
 
 from funcy import print_durations
 
@@ -21,15 +23,14 @@ DEFAULT_CACHE_DIR = '/tmp/debug_cache'
 __all__ = ('cache', 'cached', 'CacheMiss', 'DebugCache')
 
 
-import pandas as pd
-
 FLOAT_PRECISION = 0.002
 # FLOAT_PRECISION = 0.00001
 
 def _series_equal(a, b):
     if a.dtype == 'float64':
-        # TODO: handle NaNs
-        return (abs(a - b) <= FLOAT_PRECISION).all()
+        anan = np.isnan(a)
+        bnan = np.isnan(b)
+        return anan.equals(bnan) and (abs(a[~anan] - b[~bnan]) <= FLOAT_PRECISION).all()
     else:
         return a.equals(b)
 
