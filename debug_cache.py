@@ -154,6 +154,8 @@ def explain_frame_diff(a, b):
         acol = a[name]
         bcol = b[name]
         if not _series_equal(acol, bcol):
+            # print name
+            # return res
             if acol.dtype == 'float64':
                 diff = acol.index[abs(acol - bcol) > FLOAT_PRECISION]
             else:
@@ -233,11 +235,6 @@ class DebugCache(object):
 
             return result
 
-        # def invalidate(*args, **kwargs):
-        #     cache_key = key_func(func, args, kwargs)
-        #     self.delete(cache_key)
-        # wrapper.invalidate = invalidate
-
         return wrapper
 
     def checked(self, func=None, strict=True):
@@ -254,7 +251,6 @@ class DebugCache(object):
                 dirname, serialized_args, serialized_kwargs = self._call_info(func, args, kwargs)
 
                 try:
-                    print 'check', dirname
                     saved_result = self._get(dirname)
                     result = func(*args, **kwargs)
                 except CacheMiss:
@@ -271,8 +267,6 @@ class DebugCache(object):
                     if not compare(saved_result, result):
                         cprint('Result change in %s' % dirname, 'red')
                         print explain_diff(saved_result, result)
-                        # print ''
-                        print 'hey'
                         try:
                             import ipdb; ipdb.set_trace()
                         except ImportError:
@@ -285,7 +279,6 @@ class DebugCache(object):
 
     def checked_call(self, func, state): #, strict=True):
         dirname = '%s/%s' % (func.__name__, state)
-        print dirname
         args, kwargs = self._load_call_info(dirname)
         # self.checked(strict=strict)(func)(*args, **kwargs)
 
