@@ -240,7 +240,7 @@ class DebugCache(object):
 
         return wrapper
 
-    def checked(self, func=None, strict=True, subs=None):
+    def checked(self, func=None, strict=True):
         """
         Checks that function output doesn't change for same input.
         """
@@ -248,19 +248,10 @@ class DebugCache(object):
         if callable(func):
             return self.checked()(func)
 
-        subs = subs or {}
-
         def decorator(func):
-            prepend = lambda s: '%s/%s' % (func.__name__, s)
-            _subs = {prepend(k): prepend(v) for k, v in subs.items()}
-
             @wraps(func)
             def wrapper(*args, **kwargs):
                 dirname, serialized_args, serialized_kwargs = self._call_info(func, args, kwargs)
-                if dirname in _subs:
-                    cprint('Using substition in check', 'green')
-                    dirname = _subs[dirname]
-                    args, kwargs = self._load_call_info(dirname)
 
                 try:
                     print 'check', dirname
