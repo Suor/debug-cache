@@ -178,6 +178,9 @@ def explain_diff(a, b):
                                   % (a.__class__.__name__, b.__class__.__name__))
 
 
+EMPTY = object()
+
+
 class CacheMiss(Exception):
     pass
 
@@ -230,8 +233,9 @@ class DebugCache(object):
             try:
                 result = self._get(dirname)
             except CacheMiss:
+                self._set(dirname, serialized_args, serialized_kwargs)
                 result = func(*args, **kwargs)
-                self._set(dirname, serialized_args, serialized_kwargs, result)
+                self._set_out(dirname, result)
 
             return result
 
@@ -261,8 +265,9 @@ class DebugCache(object):
                         except ImportError:
                             import pdb; pdb.set_trace()
                     else:
+                        self._set(dirname, serialized_args, serialized_kwargs)
                         result = func(*args, **kwargs)
-                        self._set(dirname, serialized_args, serialized_kwargs, result)
+                        self._set_out(dirname, result)
                 else:
                     if not compare(saved_result, result):
                         cprint('Result change in %s' % dirname, 'red')
@@ -312,9 +317,8 @@ class DebugCache(object):
             raise CacheMiss
 
     # @print_durations
-    def _set(self, dirname, serialized_args, serialized_kwargs, result):
+    def _set(self, dirname, serialized_args, serialized_kwargs, out=EMPTY):
         path = os.path.join(self._path, dirname)
-
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -323,7 +327,12 @@ class DebugCache(object):
         for name, value in serialized_kwargs.items():
             self._write_file(os.path.join(path, 'k' + name), value)
 
-        self._write_file(os.path.join(path, 'out'), serialize(result))
+        if out is not EMPTY:
+            self._write_file(os.path.join(path, 'out'), serialize(out))
+
+    def _set_out(self, dirname, out):
+        path = os.path.join(self._path, dirname)
+        self._write_file(os.path.join(path, 'out'), serialize(out))
 
     # def _read_file(self, filename):
     #     with open(filename, 'rb') as f:
@@ -334,8 +343,7 @@ class DebugCache(object):
             return pickle.load(f)
 
     def _write_file(self, filename, data):
-        # Use open with exclusive rights to prevent data corruption
-        f = os.open(filename, os.O_EXCL | os.O_WRONLY | os.O_CREAT)
+        f = os.open(filename, os.O_WRONLY | os.O_CREAT)
         try:
             os.write(f, data)
         finally:
