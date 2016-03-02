@@ -136,8 +136,9 @@ def explain_frame_diff(a, b):
     # Compare column types
     if not a.dtypes.equals(b.dtypes):
         for name in a.columns:
-            if a.dtype != b.dtype:
-                res.append('Column %s changed type from %s to %s' % (name, a.dtype, b.dtype))
+            if a[name].dtype != b[name].dtype:
+                res.append('Column %s changed type from %s to %s'
+                            % (name, a[name].dtype, b[name].dtype))
         return res
 
     # Compare len
