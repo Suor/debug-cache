@@ -13,18 +13,13 @@ from termcolor import colored, cprint
 import numpy as np
 import pandas as pd
 
-from funcy import print_durations
+
+__all__ = ('cache', 'CacheMiss', 'DebugCache')
 
 
 DEFAULT_CACHE_DIR = '/tmp/debug_cache'
-# DEFAULT_CACHE_TIMEOUT = 60*60*24*30
-
-
-__all__ = ('cache', 'cached', 'CacheMiss', 'DebugCache')
-
-
 FLOAT_PRECISION = 0.002
-# FLOAT_PRECISION = 0.00001
+
 
 def _series_equal(a, b):
     if a.dtype == 'float64':
@@ -311,17 +306,13 @@ class DebugCache(object):
         path = os.path.join(self._path, func.__name__)
         return os.listdir(path)
 
-    # @print_durations
     def _get(self, dirname):
         filename = os.path.join(self._path, dirname, 'out')
         try:
-            # return self._read_data(filename)
-            with open(filename, 'rb') as f:
-                return pickle.load(f)
+            return self._read_data(filename)
         except (IOError, OSError, EOFError, pickle.PickleError):
             raise CacheMiss
 
-    # @print_durations
     def _set(self, dirname, serialized_args, serialized_kwargs, out=EMPTY):
         path = os.path.join(self._path, dirname)
         if not os.path.exists(path):
@@ -339,10 +330,6 @@ class DebugCache(object):
         path = os.path.join(self._path, dirname)
         self._write_file(os.path.join(path, 'out'), serialize(out))
 
-    # def _read_file(self, filename):
-    #     with open(filename, 'rb') as f:
-    #         return f.read()
-
     def _read_data(self, filename):
         with open(filename, 'rb') as f:
             return pickle.load(f)
@@ -354,32 +341,6 @@ class DebugCache(object):
         finally:
             os.close(f)
 
-    # def set(self, key, data, timeout=None):
-    #     filename = self._key_to_filename(key)
-    #     dirname = os.path.dirname(filename)
-
-    #     if timeout is None:
-    #         timeout = self._default_timeout
-
-    #     try:
-    #         if not os.path.exists(dirname):
-    #             os.makedirs(dirname)
-
-    #         # Use open with exclusive rights to prevent data corruption
-    #         print 'w0', filename
-    #         f = os.open(filename, os.O_EXCL | os.O_WRONLY | os.O_CREAT)
-    #         try:
-    #             print 'w1'
-    #             os.write(f, pickle.dumps(data, pickle.HIGHEST_PROTOCOL))
-    #             print 'w2'
-    #         finally:
-    #             os.close(f)
-
-    #         # Set mtime to expire time
-    #         os.utime(filename, (0, time.time() + timeout))
-    #     except (IOError, OSError):
-    #         pass
-
     def delete(self, fname):
         try:
             os.remove(fname)
@@ -389,11 +350,6 @@ class DebugCache(object):
         except (IOError, OSError):
             pass
 
-    # def _key_to_filename(self, key):
-    #     """
-    #     Returns a filename corresponding to cache key
-    #     """
-    #     return os.path.join(self._path, key)
 
 cache = DebugCache()
 
@@ -405,6 +361,7 @@ def smart_str(value, max_len=20):
         s = s[:max_len-1] + '*'
     return s
 
+
 def serialize(value):
     try:
         return pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
@@ -415,10 +372,6 @@ def deserialize(value):
     return pickle.loads(value)
 
 
-def md5hex(s):
-    return hashlib.md5(s).hexdigest()
-
-# @print_durations
 def hash_args(serialized_args, serialized_kwargs):
     hash_sum = hashlib.md5()
     for ha in serialized_args:
