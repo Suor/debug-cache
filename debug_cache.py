@@ -175,7 +175,7 @@ def explain_diff(a, b):
     elif isinstance(a, Mapping) and isinstance(b, Mapping):
         return '\n'.join(_compare_eq_dict(a, b))
     else:
-        raise NotImplementedError("Don't know how tp compare %s to %s "
+        raise NotImplementedError("Don't know how to compare %s to %s "
                                   % (a.__class__.__name__, b.__class__.__name__))
 
 
