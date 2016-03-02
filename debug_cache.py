@@ -261,6 +261,7 @@ class DebugCache(object):
                 except CacheMiss:
                     if strict:
                         cprint('No result for %s' % dirname, 'red')
+                        r, sr = result, saved_result
                         try:
                             import ipdb; ipdb.set_trace()
                         except ImportError:
@@ -273,6 +274,9 @@ class DebugCache(object):
                     if not compare(saved_result, result):
                         cprint('Result change in %s' % dirname, 'red')
                         print explain_diff(saved_result, result)
+
+                        save = lambda: self._set_out(dirname, result)
+                        r, sr = result, saved_result
                         try:
                             import ipdb; ipdb.set_trace()
                         except ImportError:
