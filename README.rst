@@ -17,32 +17,16 @@ Usage
 
 .. code:: python
 
-    from debug_cache import cache, cached
+    from debug_cache import DebugCache
+    cache = DebugCache(path='/path/to/debug_cache')
 
-    @cached
-    def some_function(x, y):
-        # do something
-        return res
-
-    @cached(timeout=60)
-    def other_function(key=None):
-        # do something else
-        return res
+    # or just use default
+    from debug_cache import cache
 
 
-    # lower-level
-    cache.set(key, value, timeout)
-    cache.get(key)
-    cache.delete(key)
-
-
-Custom default path and timeout:
+First ``debug_cache`` usage is to fasten repeated and heavy calls to tighten edit/rerun loop:
 
 .. code:: python
-
-    from debug_cache import DebugCache
-
-    cache = DebugCache(path=os.path.dirname(__file__), timeout=120)
 
     @cache.cached
     def some_function(x, y):
@@ -50,13 +34,19 @@ Custom default path and timeout:
         return res
 
 
-Check that function results didn't change:
+Second ``debug_cache`` usage is to check that function results didn't change. Useful when refactoring or optimizing:
 
 .. code:: python
 
+    # Check that function results didn't change, they need to be cached first
     @cache.checked
     def some_function(x, y):
         # ...
 
-This will stop and start debugger if function results doesn't match saved ones with `@cache.cached`
-earlier. It also stops if no cached results is found.
+    # Same, but cache first time, check all subsequent ones
+    @cache.checked(strict=False)
+    def some_function(x, y):
+        # ...
+
+
+This will stop and start debugger if function results don't match ones saved earlier. Strict version also stops if no cached results are found.
